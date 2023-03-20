@@ -1,6 +1,6 @@
 #include <stdio.h>
 #include <string.h>
-
+//first change
 int main(int argc, char **argv){
     if(argc >= 2){
         if(strcmp(argv[1], "variant") == 0){
@@ -8,4 +8,5 @@ int main(int argc, char **argv){
         }
     }
     return 0;
+
 }
