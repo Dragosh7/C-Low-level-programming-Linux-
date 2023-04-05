@@ -15,14 +15,14 @@ typedef struct
     unsigned int sect_size;
 } SECTION_HEADER;
 
-void sf(char *file_path)
+void sf(char *file_path, int sect_nr, int line_nr)
 {
     int fd = -1;
 
     fd = open(file_path, O_RDONLY);
     if (fd < 0)
     {
-        perror("ERROR\nCannot open file\n");
+        printf("ERROR\ninvalid file\n");
         return;
     }
 
@@ -37,7 +37,7 @@ void sf(char *file_path)
     }
     if (magic != '0')
     {
-        perror("ERROR\nWrong magic\n");
+        printf("ERROR\nwrong magic\n");
         close(fd);
         return;
     }
@@ -61,7 +61,7 @@ void sf(char *file_path)
     }
     if (version < 36 || version > 74)
     {
-        perror("ERROR\nwrong version\n");
+        printf("ERROR\nwrong version\n");
         close(fd);
         return;
     }
@@ -76,14 +76,12 @@ void sf(char *file_path)
     short nr_sections = nr_ofsections;
     if (nr_sections < 7 || nr_sections > 14)
     {
-        perror("ERROR\nwrong sect_nr\n");
+        printf("ERROR\nwrong sect_nr\n");
         close(fd);
         return;
     }
 
     SECTION_HEADER *header = malloc(sizeof(SECTION_HEADER) * nr_sections);
-
-    printf("SUCCESS\nversion=%d\nnr_sections=%d\n", version, nr_sections);
 
     for (int i = 0; i < nr_sections; i++)
     {
@@ -91,35 +89,94 @@ void sf(char *file_path)
         {
             perror("ERROR\nError reading section name\n");
             close(fd);
+            free(header);
             return;
         }
         if (read(fd, &header[i].sect_type, 2) < 0)
         {
             perror("ERROR\nError reading section type\n");
             close(fd);
+            free(header);
             return;
         }
         if (header[i].sect_type != 68 && header[i].sect_type != 38 && header[i].sect_type != 59)
         {
-            perror("ERROR\nwrong sect_types\n");
+            printf("ERROR\nwrong sect_types\n");
             close(fd);
+            free(header);
             return;
         }
         if (read(fd, &header[i].sect_offset, 4) < 0)
         {
             perror("ERROR\nError reading section offset\n");
             close(fd);
+            free(header);
             return;
         }
         if (read(fd, &header[i].sect_size, 4) < 0)
         {
             perror("ERROR\nError reading section size\n");
             close(fd);
+            free(header);
             return;
         }
-        printf("section%d: %s %d %d\n", i + 1, header[i].sect_name, header[i].sect_type, header[i].sect_size);
     }
+    if (sect_nr == 0 && line_nr == 0)
+    {
+        printf("SUCCESS\nversion=%d\nnr_sections=%d\n", version, nr_sections);
+        for (int i = 0; i < nr_sections; i++)
+        {
+            printf("section%d: %s %d %d\n", i + 1, header[i].sect_name, header[i].sect_type, header[i].sect_size);
+        }
+    }
+    else
+    {
+        if (sect_nr > nr_ofsections)
+        {
+            printf("ERROR\ninvalid section\n");
+            close(fd);
+            free(header);
+            return;
+        }
+        if (line_nr <= 0)
+        {
+            printf("ERROR\ninvalid line\n");
+            close(fd);
+            free(header);
+            return;
+        }
+        lseek(fd, header[sect_nr].sect_offset, SEEK_SET);
+        char extract[22];
+        int num_read, line_num = 1;
+        off_t offset = 0;
+        while ((num_read = read(fd, extract, 22)) > 0)
+        {
+            for (int i = 0; i < num_read; i++)
+            {
+                if (line_num == line_nr)
+                {
+                    printf("%s", &extract[i]);
+                }
 
+                if (extract[i] == '\n')
+                {
+                    line_num++;
+                    if (line_num > line_nr)
+                    {
+                        close(fd);
+                        return;
+                    }
+                }
+            }
+            offset += num_read;
+            if (lseek(fd, offset, SEEK_SET) == -1)
+            {
+                perror("lseek");
+                return;
+            }
+        }
+    }
+    free(header);
     close(fd);
 }
 void listRec(const char *path, int size_smaller, const char *name)
@@ -285,7 +342,41 @@ int main(int argc, char **argv)
             return -1;
         }
 
-        sf(path);
+        sf(path, 0, 0);
     }
+    if (strcmp(argv[1], "extract") == 0)
+    {
+        char *path = NULL;
+        int section = 0;
+        int line = 0;
+
+        for (int i = 2; i < argc; i++)
+        {
+            if (strncmp(argv[i], "path=", 5) == 0)
+            {
+                path = &argv[i][5];
+            }
+            else if (strncmp(argv[i], "section=", 8) == 0)
+            {
+                section = atoi(&argv[i][8]);
+            }
+            else if (strncmp(argv[i], "line=", 5) == 0)
+            {
+                line = atoi(&argv[i][5]);
+            }
+            else
+            {
+                perror("ERROR\ninvalid command\n");
+                return -1;
+            }
+        }
+        if (path == NULL)
+        {
+            perror("ERROR\ninvalid command\n");
+            return -1;
+        }
+        sf(path, section, line);
+    }
+
     return 0;
 }
