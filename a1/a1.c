@@ -29,7 +29,7 @@ void sf(char *file_path, int sect_nr, int line_nr)
     off_t file_size = lseek(fd, 0, SEEK_END);
     unsigned char magic;
     lseek(fd, file_size - 1, SEEK_SET);
-    if (read(fd, &magic, 1) < 0)
+    if (read(fd, &magic, 1) != 1)
     {
         perror("ERROR\nError reading magic\n");
         close(fd);
@@ -44,7 +44,7 @@ void sf(char *file_path, int sect_nr, int line_nr)
 
     lseek(fd, file_size - 3, SEEK_SET);
     unsigned short header_size;
-    if (read(fd, &header_size, 2) < 0)
+    if (read(fd, &header_size, 2) != 2)
     {
         perror("ERROR\nError reading header size\n");
         close(fd);
@@ -53,7 +53,7 @@ void sf(char *file_path, int sect_nr, int line_nr)
 
     lseek(fd, file_size - header_size, SEEK_SET);
     unsigned int version;
-    if (read(fd, &version, 4) < 0)
+    if (read(fd, &version, 4) != 4)
     {
         perror("ERROR\nError reading version\n");
         close(fd);
@@ -67,7 +67,7 @@ void sf(char *file_path, int sect_nr, int line_nr)
     }
     lseek(fd, file_size - header_size + 4, SEEK_SET);
     unsigned char nr_ofsections;
-    if (read(fd, &nr_ofsections, 1) < 0)
+    if (read(fd, &nr_ofsections, 1) != 1)
     {
         perror("ERROR\nError reading sections\n");
         close(fd);
@@ -85,14 +85,14 @@ void sf(char *file_path, int sect_nr, int line_nr)
 
     for (int i = 0; i < nr_sections; i++)
     {
-        if (read(fd, &header[i].sect_name, 12) < 0)
+        if (read(fd, &header[i].sect_name, 12) != 12)
         {
             perror("ERROR\nError reading section name\n");
             close(fd);
             free(header);
             return;
         }
-        if (read(fd, &header[i].sect_type, 2) < 0)
+        if (read(fd, &header[i].sect_type, 2) != 2)
         {
             perror("ERROR\nError reading section type\n");
             close(fd);
@@ -106,14 +106,14 @@ void sf(char *file_path, int sect_nr, int line_nr)
             free(header);
             return;
         }
-        if (read(fd, &header[i].sect_offset, 4) < 0)
+        if (read(fd, &header[i].sect_offset, 4) != 4)
         {
             perror("ERROR\nError reading section offset\n");
             close(fd);
             free(header);
             return;
         }
-        if (read(fd, &header[i].sect_size, 4) < 0)
+        if (read(fd, &header[i].sect_size, 4) != 4)
         {
             perror("ERROR\nError reading section size\n");
             close(fd);
@@ -145,36 +145,58 @@ void sf(char *file_path, int sect_nr, int line_nr)
             free(header);
             return;
         }
-        lseek(fd, header[sect_nr].sect_offset, SEEK_SET);
-        char extract[22];
-        int num_read, line_num = 1;
-        off_t offset = 0;
-        while ((num_read = read(fd, extract, 22)) > 0)
+        lseek(fd, header[sect_nr - 1].sect_offset, SEEK_SET);
+        // char extract[header[sect_nr].sect_size + 1];
+        // extract[header[sect_nr].sect_size] = '\0';
+        int line_num = 1;
+        // off_t offset = 0;
+        int j = 0;
+        char d;
+        char a;
+        int dynamic=512;
+        char *buffer=malloc(dynamic*sizeof(char));
+        for (int i = 0; i < header[sect_nr].sect_size; i++)
         {
-            for (int i = 0; i < num_read; i++)
+            if (line_num == line_nr)
             {
-                if (line_num == line_nr)
-                {
-                    printf("%s", &extract[i]);
-                }
-
-                if (extract[i] == '\n')
-                {
-                    line_num++;
-                    if (line_num > line_nr)
-                    {
-                        close(fd);
-                        return;
-                    }
-                }
+                break;
             }
-            offset += num_read;
-            if (lseek(fd, offset, SEEK_SET) == -1)
+
+            read(fd, &d, 1);
+            read(fd, &a, 1);
+            lseek(fd, -1, SEEK_CUR);
+
+            if (a == 0x0A && d == 0x0D)
             {
-                perror("lseek");
-                return;
+                line_num++;
             }
         }
+
+       lseek(fd, 1, SEEK_CUR);
+        
+       while(read(fd,&buffer[j],1)==1)
+        {
+            if(j+1>=dynamic)
+            {
+                dynamic*=2;
+                buffer=realloc(buffer,dynamic);
+            }
+            if (buffer[j] == '\r') {
+            // verificăm dacă următorul caracter este '\n' != 0x0A && d != 0x0D 
+            if (read(fd, &buffer[j+1], 1) == 1 && buffer[j+1] == '\n') {
+                    buffer[j] = '\0';
+                    break;
+                }
+        }
+        j++;
+        }
+        printf("SUCCESS\n");
+        //printf("%s",buffer);
+        for (int x = j - 1; x >= 0; x--)
+        {
+            printf("%c", buffer[x]);
+        }
+        free(buffer);
     }
     free(header);
     close(fd);
