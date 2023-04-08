@@ -133,57 +133,49 @@ int sf(char *file_path, int sect_nr, int line_nr, short findall_flag)
             return -1;
         }
     }
-    if (findall_flag == 1)
+    if (findall_flag == 1 && nr_sections >= 3)
     {
-        if (nr_sections < 3)
-        {
-            close(fd);
-            free(header);
-            return -1;
-        }
         int section_counter = 0;
+        char buffer[1024];
 
         for (int j = 0; j < nr_sections; j++)
         {
             lseek(fd, header[j].sect_offset, SEEK_SET);
 
             int line_num = 1;
-            char d;
-            char a;
+            int bytes_read = 0;
 
-            for (int i = 0; i < header[j].sect_size; i++)
+            while (bytes_read < header[j].sect_size && line_num <= 13)
             {
-                if (line_num > 13)
+                int read_size = header[j].sect_size - bytes_read;
+                if (read_size > 1024)
                 {
-                    break;
+                    read_size = 1024;
+                }
+                read(fd, buffer, read_size);
+
+                for (int i = 0; i < read_size; i++)
+                {
+                    if (buffer[i] == '\n' || (i > 0 && buffer[i] == '\r' && buffer[i - 1] == '\n'))
+                    {
+                        line_num++;
+                    }
                 }
 
-                read(fd, &d, 1);
-                read(fd, &a, 1);
-                lseek(fd, -1, SEEK_CUR);
+                bytes_read += read_size;
+            }
 
-                if ((a == 0x0A && d == 0x0D) || a == '\n')
-                {
-                    line_num++;
-                }
-            }
-            if (line_num == 13)
-            {
-                section_counter++;
-            }
-            if (section_counter == 3)
+            if (line_num == 13 && ++section_counter == 3)
             {
                 close(fd);
                 free(header);
                 return 1;
             }
-            if (j + 1 == nr_sections)
-            {
-                close(fd);
-                free(header);
-                return -1;
-            }
         }
+
+        close(fd);
+        free(header);
+        return -1;
     }
     else if (sect_nr == 0 && line_nr == 0)
     {
@@ -213,62 +205,67 @@ int sf(char *file_path, int sect_nr, int line_nr, short findall_flag)
 
         int line_num = 1;
         int j = 0;
-        char d;
-        char a;
-        int dynamic = 512;
+        int dynamic = 1024;
         char *buffer = malloc(dynamic * sizeof(char));
-        for (int i = 0; i < header[sect_nr - 1].sect_size; i++)
+        char read_buffer[1024];
+        int read_size = sizeof(read_buffer);
+        int pos = 0;
+        int read_count = 0;
+        int i;
+        while (pos < header[sect_nr - 1].sect_size)
         {
-            if (line_num == line_nr)
+            if (pos + read_size > header[sect_nr - 1].sect_size)
+            {
+                read_size = header[sect_nr - 1].sect_size - pos;
+            }
+            read_count = read(fd, read_buffer, read_size);
+            if (read_count <= 0)
             {
                 break;
             }
-
-            read(fd, &d, 1);
-            read(fd, &a, 1);
-            lseek(fd, -1, SEEK_CUR);
-
-            if ((a == 0x0A && d == 0x0D) || a == '\n')
+            for (i = 0; i < read_count; i++)
             {
-                line_num++;
-            }
-        }
-
-        lseek(fd, 1, SEEK_CUR);
-
-        while (read(fd, &buffer[j], 1) == 1)
-        {
-            if (j + 1 >= header[sect_nr - 1].sect_size)
-            {
-                break;
-            }
-            if (j + 1 >= dynamic)
-            {
-                dynamic *= 2;
-                buffer = realloc(buffer, dynamic);
-            }
-            if (buffer[j] == '\r')
-            {
-                // verificăm dacă următorul caracter este '\n'; != 0x0A && != 0x0D
-                if (read(fd, &buffer[j + 1], 1) == 1 && buffer[j + 1] == '\n')
+                if (line_num == line_nr)
                 {
-                    buffer[j] = '\0';
-                    break;
+                    if (read_buffer[i] == '\r')
+                    {
+                        if (i + 1 < read_count && read_buffer[i + 1] == '\n')
+                        {
+                            buffer[j] = '\0';
+                            goto done;
+                        }
+                    }
+                    else if (read_buffer[i] == '\n')
+                    {
+                        buffer[j] = '\0';
+                        goto done;
+                    }
+                    buffer[j] = read_buffer[i];
+                    j++;
+                    if (j + 1 >= dynamic)
+                    {
+                        dynamic *= 2;
+                        buffer = realloc(buffer, dynamic);
+                    }
+                }
+                if (read_buffer[i] == '\n')
+                {
+                    line_num++;
                 }
             }
-            if (buffer[j] == '\n')
-            {
-                buffer[j] = '\0';
-                break;
-            }
-            j++;
+            pos += read_count;
         }
+
+    done:
         printf("SUCCESS\n");
         for (int x = j - 1; x >= 0; x--)
         {
             printf("%c", buffer[x]);
         }
         free(buffer);
+        free(header);
+        close(fd);
+        return 0;
     }
     free(header);
     close(fd);
