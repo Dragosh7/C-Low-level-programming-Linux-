@@ -20,35 +20,28 @@ typedef struct
     pthread_cond_t *cond;
     pthread_cond_t *cond1;
     pthread_cond_t *cond2;
-    sem_t *sync1;
-    sem_t *sync2;
+    sem_t *semSync1;
+    sem_t *semSync2;
 } TH_STRUCT;
 
-typedef struct 
+typedef struct
 {
     int thread_id;
-    sem_t *sem; // pe post de lock
+    sem_t *sem;        // pe post de lock
     sem_t *semBarrier; // permite sa treaca doar 4 threaduri simultan
 
-}BARRIER_STRUCT;
-
-typedef struct{
-    int proc_nr;
-    int th_nr;
-    sem_t *sync1;
-    sem_t *sync2;
-}TH_SYNC; 
+} BARRIER_STRUCT;
 
 int order = 1; // pentru a porni threadurile in ordine
 int ok = 0;
 int closed = -1;
 
-//pentru bariere
-int condition=0;//4 threaduri trebuie sa fie pornite cand t15 isi incheie executia
-int finished=0;//cand t15 se va finaliza
+// pentru bariere
+int condition = 0; // 4 threaduri trebuie sa fie pornite cand t15 isi incheie executia
+int finished = 0;  // cand t15 se va finaliza
 
-//pentru sincronizare intre procese diferite
-sem_t semSync1,semSync2;
+// pentru sincronizare intre procese diferite
+sem_t semSync1, semSync2;
 void *same_proc(void *arg)
 {
     TH_STRUCT *params = (TH_STRUCT *)arg;
@@ -75,10 +68,11 @@ void *same_proc(void *arg)
     }
 
     info(BEGIN, 3, params->thread_nr);
-  
+
     //  if (params->thread_nr == 5)
     // {
     //     sem_wait(&semSync2); //3.5 nu porneste pana nu termina 2.4
+    //     sem_post(&semSync1); //2.1 nu incepe decat daca a terminat
     // }
 
     if (params->thread_nr == 3)
@@ -96,54 +90,50 @@ void *same_proc(void *arg)
 
     info(END, 3, params->thread_nr);
     closed = params->thread_nr;            // knowing which thread has been closed
-    //  if (closed == 5)
-    // {
-    //     sem_post(&semSync1); //2.1 nu incepe decat daca a terminat
-    // }
-
     pthread_cond_broadcast(params->cond2); // signal for thread 3 that thread 2 ended
 
     return NULL;
 }
 
-void* th_barrier(void* param)
+void *th_barrier(void *param)
 {
-    BARRIER_STRUCT *s = (BARRIER_STRUCT*)param;
+    BARRIER_STRUCT *s = (BARRIER_STRUCT *)param;
     int nr_perm;
 
-    if(s->thread_id == 15)
+    if (s->thread_id == 15)
     {
-        condition = 1; //T15 intra primul
+        condition = 1; // T15 intra primul
         sem_wait(s->semBarrier);
         info(BEGIN, 7, s->thread_id);
 
-        sem_wait(s->sem);// thread-ul si-a terminat executia
+        sem_wait(s->sem); // thread-ul si-a terminat executia
         info(END, 7, s->thread_id);
 
-        finished = 1; //le da drumul celorlalte thread-uri pt ca T15 e finalizat
+        finished = 1; // le da drumul celorlalte thread-uri pt ca T15 e finalizat
         sem_post(s->semBarrier);
     }
     else
     {
-        while(!condition);
-        sem_getvalue(s->semBarrier, &nr_perm); //odata ce s-au scazut 4 si a ajuns la 0
-        if(nr_perm == 0){
+        while (!condition);
+        sem_getvalue(s->semBarrier, &nr_perm); // odata ce s-au scazut 4 si a ajuns la 0
+        if (nr_perm == 0)
+        {
             sem_post(s->sem);
         }
         sem_wait(s->semBarrier);
         info(BEGIN, 7, s->thread_id);
-        while(!finished);/// Wait for thread 15 to finish
+        while (!finished); /// Wait for thread 15 to finish
         info(END, 7, s->thread_id);
         sem_post(s->semBarrier);
     }
 
     return NULL;
 }
-void* th_diff_proc(void* arg)
-{  
-    TH_SYNC *params = (TH_SYNC*)arg;
-   
-    info(BEGIN, params->proc_nr, params->th_nr);
+void *th_diff_proc(void *arg)
+{
+    TH_STRUCT *params = (TH_STRUCT *)arg;
+
+    info(BEGIN, 2, params->thread_nr);
     // if (params->th_nr == 1)
     // {
     //    sem_wait(&semSync1);
@@ -152,8 +142,8 @@ void* th_diff_proc(void* arg)
     // {
     //     sem_post(&semSync2);
     // }
-    info(END, params->proc_nr, params->th_nr);
-   
+    info(END, 2, params->thread_nr);
+
     return NULL;
 }
 
@@ -161,10 +151,9 @@ int main()
 {
     init();
 
-      
-                   
-                    sem_init(&semSync1, 0, 0);
-                    sem_init(&semSync2, 0, 0); //semaphore Barrier (cu cel mult 4 threaduri)
+    sem_init(&semSync1, 0, 0);
+    sem_init(&semSync2, 0, 0);
+
     info(BEGIN, 1, 0);
 
     // process 2
@@ -172,23 +161,21 @@ int main()
     {
 
         info(BEGIN, 2, 0);
-         pthread_t s_tid[5];
-          TH_SYNC s_params[5];
-         for (int i = 0; i<5; i++)
-                    {
-                        s_params[i].proc_nr = 2;
-                        s_params[i].th_nr = i+1;
-                        s_params[i].sync1= &semSync1;
+        pthread_t tid[5];
+        TH_STRUCT params[5];
+        for (int i = 0; i < 5; i++)
+        {
+            params[i].thread_nr = i + 1;
+            params[i].semSync1 = &semSync1;
+            params[i].semSync2 = &semSync2;
+            pthread_create(&tid[i], NULL, th_diff_proc, &params[i]);
+        }
 
-                        s_params[i].sync2= &semSync2;
-                        pthread_create(&s_tid[i], NULL, th_diff_proc, &s_params[i]);
-                    }
+        for (int i = 0; i < 5; i++)
+        {
+            pthread_join(tid[i], NULL);
+        }
 
-                    for (int i = 0; i<5; i++)
-                    {
-                        pthread_join(s_tid[i], NULL);
-                    }
-                    
         // process 4
         if (fork() == 0)
         {
@@ -229,8 +216,6 @@ int main()
                 params[i].cond = &cond;
                 params[i].cond1 = &cond1;
                 params[i].cond2 = &cond2;
-                params[i].sync1 = &semSync1;
-                params[i].sync2 = &semSync2;
                 pthread_create(&tid[i], NULL, same_proc, &params[i]);
             }
 
@@ -274,27 +259,28 @@ int main()
             if (fork() == 0)
             {
                 info(BEGIN, 7, 0);
-                    sem_t sem,semBarrier;
-                    BARRIER_STRUCT params[40];
-                    pthread_t tid[40];
+                sem_t sem, semBarrier;
+                BARRIER_STRUCT params[40];
+                pthread_t tid[40];
 
-                    sem_init(&sem, 0, 0);
-                    sem_init(&semBarrier, 0, 4); //semaphore Barrier (cu cel mult 4 threaduri)
+                sem_init(&sem, 0, 0);
+                sem_init(&semBarrier, 0, 4); // semaphore Barrier (cu cel mult 4 threaduri)
 
-                    for(int i = 0; i < 40; i++)
-                    {
-                        params[i].sem = &sem;
-                        params[i].semBarrier = &semBarrier;
-                        params[i].thread_id = i + 1;
-                        pthread_create(&tid[i], NULL, th_barrier, &params[i]);
-                    }
-                    for(int i = 0; i< 40; i++){
-                        pthread_join(tid[i], NULL);
-                    }
+                for (int i = 0; i < 40; i++)
+                {
+                    params[i].sem = &sem;
+                    params[i].semBarrier = &semBarrier;
+                    params[i].thread_id = i + 1;
+                    pthread_create(&tid[i], NULL, th_barrier, &params[i]);
+                }
+                for (int i = 0; i < 40; i++)
+                {
+                    pthread_join(tid[i], NULL);
+                }
 
-                        sem_destroy(&sem);
-                        sem_destroy(&semBarrier);
-                    
+                sem_destroy(&sem);
+                sem_destroy(&semBarrier);
+
                 info(END, 7, 0);
             }
             else
@@ -304,7 +290,7 @@ int main()
             }
         }
     }
-    
+
     sem_destroy(&semSync1);
     sem_destroy(&semSync2);
 
